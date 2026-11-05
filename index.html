@@ -1,23 +1,91 @@
-<button id="connect">Connect</button>
-<div id="value">--</div>
-<script>
-document.getElementById('connect').onclick = async () => {
-  const device = await navigator.bluetooth.requestDevice({
-    filters: [{ name: 'NanoSensor' }],
-    optionalServices: ['19b10000-e8f2-537e-4f6c-d104768a1214']
-  });
-  const server = await device.gatt.connect();
-  const service = await server.getPrimaryService('19b10000-e8f2-537e-4f6c-d104768a1214');
-  const ch = await service.getCharacteristic('19b10001-e8f2-537e-4f6c-d104768a1214');
-  await ch.startNotifications();
-  const decoder = new TextDecoder();
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nano Sensor</title>
+  <style>
+    body { font-family: sans-serif; max-width: 500px; margin: 2rem auto; padding: 0 1rem; }
+    #status { padding: .6rem 1rem; border-radius: 6px; margin: 1rem 0; background: #eee; }
+    #status.ok { background: #d4f5d4; }
+    #status.wait { background: #fff3c4; }
+    #status.err { background: #ffd6d6; }
+    #value { font-size: 1.6rem; margin-top: 1rem; word-break: break-word; }
+    button { padding: .6rem 1.2rem; font-size: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Nano Sensor</h1>
+  <button id="connect">Connect</button>
+  <button id="disconnect" disabled>Disconnect</button>
+  <div id="status">Not connected</div>
+  <div id="value">--</div>
 
-ch.addEventListener('characteristicvaluechanged', e => {
-  document.getElementById('value').textContent = decoder.decode(e.target.value);
-});
+  <script>
+    const SERVICE = '19b10000-e8f2-537e-4f6c-d104768a1214';
+    const CHAR = '19b10001-e8f2-537e-4f6c-d104768a1214';
+    const decoder = new TextDecoder();
 
-// show the current text right after connecting
-const first = await ch.readValue();
-document.getElementById('value').textContent = decoder.decode(first);
-};
-</script>
+    const connectBtn = document.getElementById('connect');
+    const disconnectBtn = document.getElementById('disconnect');
+    const statusEl = document.getElementById('status');
+    const valueEl = document.getElementById('value');
+    let device = null;
+
+    function setStatus(text, type) {
+      statusEl.textContent = text;
+      statusEl.className = type || '';
+    }
+
+    function setConnected(isConnected) {
+      connectBtn.disabled = isConnected;
+      disconnectBtn.disabled = !isConnected;
+    }
+
+    function onDisconnected() {
+      setStatus('Disconnected from Nano', 'err');
+      setConnected(false);
+    }
+
+    connectBtn.onclick = async () => {
+      if (!navigator.bluetooth) {
+        setStatus('Web Bluetooth is not supported in this browser', 'err');
+        return;
+      }
+      try {
+        setStatus('Choose your device...', 'wait');
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ name: 'NanoSensor' }],
+          optionalServices: [SERVICE]
+        });
+        device.addEventListener('gattserverdisconnected', onDisconnected);
+
+        setStatus('Connecting to ' + device.name + '...', 'wait');
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE);
+        const ch = await service.getCharacteristic(CHAR);
+
+        ch.addEventListener('characteristicvaluechanged', e => {
+          valueEl.textContent = decoder.decode(e.target.value);
+        });
+        await ch.startNotifications();
+        valueEl.textContent = decoder.decode(await ch.readValue());
+
+        setStatus('Connected to ' + device.name, 'ok');
+        setConnected(true);
+      } catch (err) {
+        if (err.name === 'NotFoundError') {
+          setStatus('No device selected', '');
+        } else {
+          setStatus('Error: ' + err.message, 'err');
+        }
+        setConnected(false);
+      }
+    };
+
+    disconnectBtn.onclick = () => {
+      if (device && device.gatt.connected) device.gatt.disconnect();
+    };
+  </script>
+</body>
+</html>
